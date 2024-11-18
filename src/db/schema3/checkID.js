@@ -1,5 +1,5 @@
 const mongoose = require('mongoose')
-const Mymodel = require('./schema2')
+const Mymodel = require('./schema3')
 
 async function checkID(ID) 
 {

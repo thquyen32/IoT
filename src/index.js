@@ -87,7 +87,10 @@ app.post('/add', async (req,res) =>
 {
  await add(ID);
 })
-
+app.get("/", (req,res) =>
+{
+  res.send("hello")
+})
 server.listen(port, '0.0.0.0', () => {
   console.log(`Server is listening on port ${port}`);
 });
