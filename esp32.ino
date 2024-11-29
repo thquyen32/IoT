@@ -1,26 +1,29 @@
-#include <WiFi.h>;
-#include <HTTPClient.h>;
-#include <Wire.h>;
-#include <LiquidCrystal_I2C.h>;
-#include <Keypad.h>;
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <Keypad.h>
+#include <MFRC522.h>
 
-const char* ssid = "Bong Nhim.5G";          // Thay thế với tên WiFi của bạn
-const char* password = "Minh@151208";  // Thay thế với mật khẩu WiFi của bạn
+#define SS_PIN 4   
+#define RST_PIN 5 
 
-const char* serverUrl = "http://192.168.1.17:8483/pass";  // Địa chỉ server của bạn
-const char* serverUrl1 = "http://192.168.1.17:8483/changepass";  // Địa chỉ server của bạn
+const char* ssid = "Bong Nhim.5G";          
+const char* password = "Minh@151208"; 
+const char* serverUrl_pass = "http://192.168.1.17:8483/pass";  
+const char* serverUrl_changepass = "http://192.168.1.17:8483/changepass";
+const char *server_card = "http://192.168.0.104:8483/card"; 
+const char *server_addcard = "http://192.168.0.104:8483/add"; 
 
-LiquidCrystal_I2C lcd(0x27, 16, 2); // LCD 16x2
+MFRC522 mfrc522(SS_PIN, RST_PIN); 
+LiquidCrystal_I2C lcd(0x27, 16, 2); 
 
-// Xác định số lượng hàng và cột của bàn phím ma trận 4x3
-const byte ROW_NUM    = 4; // Số hàng
-const byte COLUMN_NUM = 3; // Số cột
+const byte ROW_NUM    = 4; 
+const byte COLUMN_NUM = 3;
 
-// Chân kết nối của các hàng và cột
-byte rowPins[ROW_NUM] = {12, 13, 14, 15}; // Chân hàng
-byte colPins[COLUMN_NUM] = {16, 17, 18};  // Chân cột
+byte rowPins[ROW_NUM] = {12, 13, 14, 15}; 
+byte colPins[COLUMN_NUM] = {16, 17, 18};  
 
-// Định nghĩa các phím trên bàn phím ma trận
 char keys[ROW_NUM][COLUMN_NUM] = {
   {'1', '2', '3'},
   {'4', '5', '6'},
@@ -28,22 +31,18 @@ char keys[ROW_NUM][COLUMN_NUM] = {
   {'*', '0', '#'}
 };
 
-// Tạo đối tượng bàn phím
 Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROW_NUM, COLUMN_NUM);
 
 String enteredPassword = "";
-bool passwordCorrect = false;  // Cờ để kiểm tra mật khẩu đúng hay sai
-int i=5;
+bool passwordCorrect = false;  
+int i=5; 
 bool doiPass = false;
+String cardID = "";
 
 void setup() {
-  // Bắt đầu giao tiếp Serial để debug
   Serial.begin(115200);
-
   lcd.init();
-  lcd.backlight(); // Bật đèn nền
-
-  // Kết nối WiFi
+  lcd.backlight();
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
@@ -51,56 +50,116 @@ void setup() {
   }
   Serial.println("Connected to WiFi");
   Serial.println(WiFi.localIP());
-
-  // Kết nối với server
-  //HTTPClient http;
-  //http.begin(serverUrl);  // Bắt đầu kết nối với URL của server
-
-  // Gửi yêu cầu HTTP GET đến server
-  //int httpCode = http.GET();
-
-  // Kiểm tra mã trạng thái của yêu cầu
-  //if (httpCode > 0) {
-  //  Serial.printf("HTTP GET request sent. Response code: %d\n", httpCode);
-  //  String payload = http.getString();  // Lấy dữ liệu trả về từ server
-  //  Serial.println("Server Response:");
-  //  Serial.println(payload);
-  //} else {
-  //  Serial.printf("HTTP GET request failed. Error code: %d\n", httpCode);
-  //}
-
-  // Đóng kết nối
-  //http.end();
-
-  lcd.setCursor(0, 1); // Di chuyển con trỏ đến cột 0, hàng 0
-  lcd.print("DOOR LOCK"); // Hiển thị chuỗi
-  lcd.setCursor(0, 0); // Di chuyển con trỏ đến cột 0, hàng 0
-  lcd.print("PASS:"); // Hiển thị chuỗi
+  lcd.setCursor(0, 1); 
+  lcd.print("DOOR LOCK"); 
+  lcd.setCursor(0, 0); 
+  lcd.print("PASS:"); 
 }
 
 void loop() {
-  // Nếu mật khẩu đã đúng, không cần nhận thêm mật khẩu nữa
-  if (passwordCorrect) {
+if (mfrc522.PICC_IsNewCardPresent()) {
+    if (mfrc522.PICC_ReadCardSerial()) {
+      Serial.println("Card detected!");
+      for (byte i = 0; i < mfrc522.uid.size; i++) {
+        cardID += String(mfrc522.uid.uidByte[i]);
+      }
+      Serial.print("Card UID: ");
+      Serial.println(cardID);
+
+      if ( sendCardToServer(cardID)) {
+        // Thêm hành động
+        Serial.println("Card is already in database.");
+      } else {
+        Serial.println("Card not found in database. Waiting for PIN to add...");
+        // thêm LCD
+      }
+      mfrc522.PICC_HaltA();
+      mfrc522.PCD_StopCrypto1(); 
+    }
+  }
+numPad();
+}
+bool addCardToDatabase(String cardID) {
+ if (WiFi.status() == WL_CONNECTED) {  
+    HTTPClient http;
+    http.begin(server_addcard);
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");  
+
+    String payload = "ID=" +cardID;
+    Serial.println("Sending payload: " + payload); 
+
+    int httpResponseCode = http.POST(payload);
+
+    if (httpResponseCode > 0) {
+      String response = http.getString();
+      Serial.println("Response from server: " + response); 
+      if (response == "Accept") {
+        // thêm hành động
+        Serial.println("Door is open!");
+        return true;
+      }
+    } else {
+      Serial.print("Error in HTTP request, response code: ");
+      Serial.println(httpResponseCode); 
+      Serial.println("Unable to connect to server.");
+    }
+    http.end();
+  } else {
+    Serial.println("WiFi not connected. Cannot connect to server.");
+  }
+  return false;
+}
+bool sendCardToServer(String cardID) {
+  if (WiFi.status() == WL_CONNECTED) {  
+    HTTPClient http;
+    http.begin(server_card);
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");  
+
+    String payload = "ID=" +cardID;
+    Serial.println("Sending payload: " + payload); 
+
+    int httpResponseCode = http.POST(payload);
+
+    if (httpResponseCode > 0) {
+      String response = http.getString();
+      Serial.println("Response from server: " + response); 
+      if (response == "Accept") {
+        // thêm hành động
+        Serial.println("Door is open!");
+        return true;
+      }
+    } else {
+      Serial.print("Error in HTTP request, response code: ");
+      Serial.println(httpResponseCode); 
+      Serial.println("Unable to connect to server.");
+    }
+    http.end();
+  } else {
+    Serial.println("WiFi not connected. Cannot connect to server.");
+  }
+  return false;
+}
+void numPad()
+{
+    if (passwordCorrect) {
     Serial.println("Password correct! No further input will be accepted.");
     delay(10000);
-    return;  // Dừng vòng lặp (hoặc có thể làm gì đó sau khi xác nhận mật khẩu)
-  }
-  char key = keypad.getKey();  // Đọc giá trị phím nhấn
+    return;  
+  } 
+  char key = keypad.getKey();  
   if (key) {
     Serial.print("Key Pressed: ");
     Serial.println(key);
-    lcd.setCursor(i, 0); // Di chuyển con trỏ đến cột i, hàng 0
-    if(key == '#') lcd.print("#"); // Hiển thị chuỗi
+    lcd.setCursor(i, 0); 
+    if(key == '#') lcd.print("#"); 
     else lcd.print("*");
     delay(500);
     i+=2;
 
-    // Nếu người dùng nhập mật khẩu, thêm vào chuỗi enteredPassword
     if (enteredPassword.length() < 4) {
-      enteredPassword += key;  // Thêm số vào mật khẩu
+      enteredPassword += key;
     }
     
-    // Nếu đã nhập đủ 4 chữ số, kiểm tra mật khẩu
     if (enteredPassword.length() == 4) {
       if(enteredPassword == "####"){
         Serial.print("Change Password");
@@ -116,90 +175,73 @@ void loop() {
         Serial.print("Password entered: ");
         Serial.println(enteredPassword);
 
-        // Gửi mật khẩu đến server qua HTTP POST
-        if(WiFi.status() == WL_CONNECTED) {  // Kiểm tra kết nối Wi-Fi
+        if(WiFi.status() == WL_CONNECTED) {  
           HTTPClient http;
-          http.begin(serverUrl);  // Kết nối đến server
-          http.addHeader("Content-Type", "application/json");  // Định dạng JSON
+          http.begin(serverUrl_pass);
+          http.addHeader("Content-Type", "application/x-www-form-urlencoded");  
 
-          // Tạo JSON với mật khẩu
-          String jsonPayload = "{\"PASS\":\"" + enteredPassword + "\"}";
+          String Payload = "PASS+=" + enteredPassword;
 
-        // Gửi HTTP POST yêu cầu
-          int httpCode = http.POST(jsonPayload);
+          int httpCode = http.POST(Payload);
 
-          // Kiểm tra mã trạng thái HTTP
           if (httpCode > 0) {
-            String payload = http.getString();  // Lấy dữ liệu trả về từ server
-
+            String response = http.getString();
             Serial.println("Server Response: ");
-            Serial.println(payload);  // In ra phản hồi từ server
-
-            // So sánh mật khẩu nhập vào với mật khẩu chính xác
-            if (payload == "Door is open") {
+            Serial.println(response);
+            if (response == "Door is open") {
               clearLine(0);
-              lcd.setCursor(0, 0); // Di chuyển con trỏ đến cột 0, hàng 0
-              lcd.print("PASS CORRECT"); // Hiển thị chuỗi
+              lcd.setCursor(0, 0); 
+              lcd.print("PASS CORRECT"); 
               clearLine(1);
-              lcd.setCursor(0, 1); // Di chuyển con trỏ đến cột 0, hàng 0
-              lcd.print("DOOR OPEN"); // Hiển thị chuỗi
+              lcd.setCursor(0, 1); 
+              lcd.print("DOOR OPEN"); 
               delay(1000);
-              passwordCorrect = true;  // Đặt cờ để ngừng nhận mật khẩu
-              // Có thể mở cửa hoặc thực hiện hành động nào đó
+              passwordCorrect = true; 
             } else {
               Serial.println("Incorrect password.");
-              // Sau khi kiểm tra, reset chuỗi mật khẩu để nhập lại
-              lcd.setCursor(0, 0); // Di chuyển con trỏ đến cột 0, hàng 0
-              lcd.print("PASS INCORRECT"); // Hiển thị chuỗi
+              lcd.setCursor(0, 0); 
+              lcd.print("PASS INCORRECT"); 
               delay(1000);
               clearLine(0);
-              lcd.setCursor(0, 0); // Di chuyển con trỏ đến cột 0, hàng 0
-              lcd.print("PASS:"); // Hiển thị chuỗi
+              lcd.setCursor(0, 0);
+              lcd.print("PASS:"); 
               i=5;
-              enteredPassword = "";  // Reset mật khẩu sau khi kiểm tra
+              enteredPassword = ""; 
             }
           } else {
               Serial.println("Error on HTTP request");
             } 
-        http.end();  // Đóng kết nối
+        http.end();  
         }
-      delay(10000);  // Chờ 10 giây trước khi thử lại (hoặc bạn có thể điều chỉnh để nhận input từ người dùng)
+      delay(10000);  
       } else {
           Serial.print("NewPassword entered: ");
           Serial.println(enteredPassword);
 
-        // Gửi mật khẩu đến server qua HTTP POST
-        if(WiFi.status() == WL_CONNECTED) {  // Kiểm tra kết nối Wi-Fi
+        if(WiFi.status() == WL_CONNECTED) { 
           HTTPClient http;
-          http.begin(serverUrl1);  // Kết nối đến server
-          http.addHeader("Content-Type", "application/json");  // Định dạng JSON
+          http.begin(serverUrl_changepass);
+          http.addHeader("Content-Type", "application/x-www-form-urlencoded");  
 
-          // Tạo JSON với mật khẩu
-          String jsonPayload = "{\"PASS\":\"" + enteredPassword + "\"}";
-
-        // Gửi HTTP POST yêu cầu
+          String Payload = "PASS+=" enterPassword;
           int httpCode = http.POST(jsonPayload);
 
-          // Kiểm tra mã trạng thái HTTP
           if (httpCode > 0) {
-            String payload = http.getString();  // Lấy dữ liệu trả về từ server
-
+            String response = http.getString(); 
             Serial.println("Server Response: ");
-            Serial.println(payload);  // In ra phản hồi từ server
-
-            // So sánh mật khẩu nhập vào với mật khẩu chính xác
-            if (payload == "Update Success") {
+            Serial.println(response);  
+            if (response == "Update Success") {
               clearLine(0);
-              lcd.setCursor(0, 0); // Di chuyển con trỏ đến cột 0, hàng 0
-              lcd.print("PASS UPDATED"); // Hiển thị chuỗi
+              lcd.setCursor(0, 0); 
+              lcd.print("PASS UPDATED");
               delay(1000);
             }
           } else {
               Serial.println("Error on HTTP request");
             } 
-        http.end();  // Đóng kết nối
+        http.end(); 
         }
-        delay(10000);  // Chờ 10 giây trước khi thử lại (hoặc bạn có thể điều chỉnh để nhận input từ người dùng)
+        delay(10000);  
         clearLine(0);
         lcd.setCursor(0, 0);
         lcd.print("PASS:");
@@ -210,12 +252,10 @@ void loop() {
     }
   }
 }
-
-// Hàm xóa một dòng cụ thể trên LCD
 void clearLine(int line) {
-  lcd.setCursor(0, line);    // Đặt con trỏ về vị trí đầu dòng (cột 0)
-  for (int i = 0; i < 16; i++) { // Lặp qua tất cả các cột của dòng
-    lcd.print(" ");  // In dấu cách để xóa nội dung trên LCD
+  lcd.setCursor(0, line);    
+  for (int i = 0; i < 16; i++) {
+    lcd.print(" "); 
   }
 }
 
