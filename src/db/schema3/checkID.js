@@ -3,15 +3,9 @@ const Mymodel = require('./schema3')
 
 async function checkID(ID) 
 {
-    const Instance = await Mymodel.findOne()  
-    
+    const Instance = await Mymodel.findOne({id_card:ID})  
     if(Instance)
-    {
-        if(Instance.id_card == ID)
-            return true
-        else
-        return false
-    }
+    return true
     else 
     return false
 }

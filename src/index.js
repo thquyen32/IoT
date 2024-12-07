@@ -18,19 +18,45 @@ app.use(express.urlencoded({
 }))
 
 const server = http.createServer(app); // Tạo một server HTTP và kết hợp với Express
-const wss = new Websocket.Server({ server }); // Sử dụng server HTTP với WebSocket
+const wss = new Websocket.Server({ server}); // Sử dụng server HTTP với WebSocket
+const clients = new Map()
 
+let clientID
 
 db.connect()
 // Websocket server
 wss.on('connection', function connection(ws) {
-  ws.on('error', console.error);
-  console.log('A new connection');
-  
+  console.log(`New Connection`);
+  ws.send("HELLO")
+  let clientID
   ws.on('message', function message(data) {
-    console.log(data.toString())
-  });
+  const json = JSON.parse(data)
+  if(json.type == 'Register')
+  {
+   clientID = json.ID
+  if(clients.has(clientID))
+  {
+    console.log('da co id nay r')
+  }
+  else
+  {
+  clients.set(clientID,ws)
+  console.log("Dang ky thanh cong %s",clientID)
+  }
+  }
+})
+ws.on('close', (code, reason) => {
+  if (clientID) {
+      clients.delete(clientID);
+      console.log('Đã xóa client:', clientID);
+  }
+  console.log(`WebSocket đóng với mã: ${code}, lý do: ${reason}`);
 });
+  ws.on('error', ()=>{
+    // clients.delete(clientID)
+    // console.log('Đã xóa client: %s',clientID)
+  });
+})
 // dùng để check tài khoản mật khẩu
 app.post('/',async (req,res) => {
   const SSID = req.body.SSID
@@ -45,15 +71,32 @@ app.post('/',async (req,res) => {
     res.send('Your SSID or PASSWORD is invalid')
 }
 })
-// Dùng để check mật khẩu khóa
-app.post('/pass', async (req,res) => {
-  const PASS = req.body.PASS
-  const result = await checkpass(PASS)
+app.post('/android', async (req,res) => {
+  const pass_input = req.body.PASS
+  console.log(pass_input)
+  const result = await checkpass(pass_input)
   console.log(result)
   if(result == true)
   {
     res.send('Door is open')
+    sendToClient("1", "DOOR IS OPEN")
   }
+  else
+  res.send("CUT") 
+})
+// Dùng để check mật khẩu khóa
+app.post('/pass', async (req,res) => {
+  const pass_input = req.body.PASS
+  console.log(pass_input)
+  const result = await checkpass(pass_input)
+  console.log(result)
+  if(result == true)
+  {
+    res.send('Door is open')
+    sendToClient("2", "DOOR IS OPEN")
+  }
+  else
+  res.send("CUT") 
 })
 // Dùng để đổi mật khẩu
 app.post('/changepass',async (req,res) => 
@@ -77,20 +120,34 @@ app.post('/card', async (req,res) =>
 {
   const ID = req.body.ID
   const result = await checkID(ID)
-  console.log(result)
   if(result == true)
   {
     res.send('Accept')
+    sendToClient("2", "DOOR IS OPEN")
   }
+  else 
+  console.log("Loi o day")
 })
 app.post('/add', async (req,res) => 
 {
- await add(ID);
+  ID = req.body.ID
+ if(add(ID))
+ {
+  res.send("Success")
+ }
+ else
+ res.send("FAILED")
 })
-app.get("/", (req,res) =>
-{
-  res.send("hello")
-})
+
 server.listen(port, '0.0.0.0', () => {
   console.log(`Server is listening on port ${port}`);
 });
+
+function sendToClient(clientId, message) {
+  const client = clients.get(clientId);
+  if (client && client.readyState === WebSocket.OPEN) {
+      client.send(message);
+  } else {
+      console.log(`Client ${clientId} không tồn tại hoặc không kết nối.`);
+  }
+}

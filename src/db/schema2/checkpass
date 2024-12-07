@@ -1,18 +1,11 @@
 const mongoose = require('mongoose')
 const Mymodel = require('./schema2')
 
-async function checkpass(PASS) 
+async function checkpass(pass_input) 
 {
-    const Instance = await Mymodel.findOne()  
-    
+    const Instance = await Mymodel.findOne({PASS:pass_input})  
     if(Instance)
-    {
-        console.log(Instance.PASS)
-        if(Instance.PASS == PASS)
-            return true
-        else
-        return false
-    }
+    return true
     else 
     return false
 }
